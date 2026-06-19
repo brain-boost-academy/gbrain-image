@@ -6,7 +6,10 @@ concurrency:
 
 on:
   schedule:
-    - cron: "0 * * * *"
+    # Avoid minute 0: top-of-hour is GitHub's most oversubscribed slot and
+    # scheduled runs there are frequently delayed or dropped. An odd minute
+    # is far more reliable. GitHub still does not guarantee punctuality.
+    - cron: "37 * * * *"
   push:
     branches:
       - main
