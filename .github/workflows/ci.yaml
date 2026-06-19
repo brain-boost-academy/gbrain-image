@@ -5,25 +5,46 @@ concurrency:
   cancel-in-progress: false
 
 on:
+  schedule:
+    - cron: "0 * * * *"
   push:
     branches:
       - main
+  workflow_dispatch:
 
 jobs:
   build:
     permissions:
       contents: read
       packages: write
-      attestations: write
-      id-token: write
     runs-on: ubuntu-latest
+    env:
+      GBRAIN_REPO: garrytan/gbrain
+      IMAGE: ghcr.io/${{ github.repository }}/gbrain
     steps:
       - id: checkout
         name: Checkout
         uses: actions/checkout@v6
-      - id: setup-buildx
-        name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@v4
+
+      - id: resolve
+        name: Resolve gbrain version and SHA
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Pin to the exact master commit and read package.json AT that commit,
+          # so the version tag and the build come from the same source (no race).
+          sha=$(gh api "repos/${GBRAIN_REPO}/commits/master" --jq .sha)
+          version=$(gh api "repos/${GBRAIN_REPO}/contents/package.json?ref=${sha}" \
+                      -H "Accept: application/vnd.github.raw" --jq .version)
+          # Fail-safe: refuse to publish a garbage/empty label. Accept 3- or 4-part
+          # versions so a future upstream switch back to 3-part semver doesn't hard-fail.
+          echo "$version" | grep -Eq '^[0-9]+(\.[0-9]+){2,3}$' \
+            || { echo "bad version: '$version'" >&2; exit 1; }
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Resolved gbrain $version @ $sha"
+
       - id: login
         name: Login to docker registry
         uses: docker/login-action@v4
@@ -31,11 +52,39 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: exists
+        name: Check if version already published
+        if: github.event_name == 'schedule'
+        run: |
+          # Dedup probe — only on schedule (push/manual always rebuild). Distinguish
+          # "tag/repo not found" (build it) from any other registry error (fail loudly)
+          # so a transient glitch can't masquerade as "not published". "name unknown"
+          # covers the first run, when the package repo doesn't exist yet.
+          if out=$(docker buildx imagetools inspect "${IMAGE}:${{ steps.resolve.outputs.version }}" 2>&1); then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "${IMAGE}:${{ steps.resolve.outputs.version }} already published."
+          elif printf '%s' "$out" | grep -qiE 'not found|manifest unknown|name unknown|not present'; then
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "${IMAGE}:${{ steps.resolve.outputs.version }} not published yet — will build."
+          else
+            echo "dedup probe failed (not a 404): $out" >&2
+            exit 1
+          fi
+
+      - id: setup-buildx
+        name: Setup Docker Buildx
+        if: steps.exists.outputs.exists == 'false' || github.event_name != 'schedule'
+        uses: docker/setup-buildx-action@v4
+
       - id: build-push
         name: Build and push
+        if: steps.exists.outputs.exists == 'false' || github.event_name != 'schedule'
         uses: docker/build-push-action@v7
         with:
           push: true
+          build-args: |
+            GBRAIN_REF=${{ steps.resolve.outputs.sha }}
           tags: |
-            ghcr.io/${{ github.repository }}/gbrain:latest
-            ghcr.io/${{ github.repository }}/gbrain:${{ github.sha }}
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ steps.resolve.outputs.version }}

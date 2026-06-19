@@ -5,7 +5,8 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 ENV BUN_INSTALL=/usr/local
-RUN bun install -g github:garrytan/gbrain \
+ARG GBRAIN_REF=master
+RUN bun install -g "github:garrytan/gbrain#${GBRAIN_REF}" \
  && gbrain --version
 
 ENV GBRAIN_HOME=/gbrain
