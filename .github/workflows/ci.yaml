@@ -23,7 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GBRAIN_REPO: garrytan/gbrain
-      IMAGE: ghcr.io/${{ github.repository }}/gbrain
+      IMAGE: ghcr.io/${{ github.repository }}
     steps:
       - id: checkout
         name: Checkout
