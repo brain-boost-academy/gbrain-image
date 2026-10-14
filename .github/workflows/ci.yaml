@@ -14,6 +14,15 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      ref:
+        description: "gbrain tag/sha to build (empty = master; non-master builds don't move :latest)"
+        required: false
+        default: ""
+      bun_version:
+        description: "oven/bun base image version (gbrain >= 0.60.27.0 needs 1.4+)"
+        required: false
+        default: "1.4.3"
 
 jobs:
   build:
@@ -33,11 +42,13 @@ jobs:
         name: Resolve gbrain version and SHA
         env:
           GH_TOKEN: ${{ github.token }}
+          INPUT_REF: ${{ inputs.ref }}
         run: |
           set -euo pipefail
           # Pin to the exact master commit and read package.json AT that commit,
           # so the version tag and the build come from the same source (no race).
-          sha=$(gh api "repos/${GBRAIN_REPO}/commits/master" --jq .sha)
+          ref="${INPUT_REF:-master}"
+          sha=$(gh api "repos/${GBRAIN_REPO}/commits/${ref}" --jq .sha)
           version=$(gh api "repos/${GBRAIN_REPO}/contents/package.json?ref=${sha}" \
                       -H "Accept: application/vnd.github.raw" --jq .version)
           # Fail-safe: refuse to publish a garbage/empty label. Accept 3- or 4-part
@@ -46,6 +57,11 @@ jobs:
             || { echo "bad version: '$version'" >&2; exit 1; }
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [ "$ref" = "master" ]; then
+            echo "latest_tag=${IMAGE}:latest" >> "$GITHUB_OUTPUT"
+          else
+            echo "latest_tag=" >> "$GITHUB_OUTPUT"
+          fi
           echo "Resolved gbrain $version @ $sha"
 
       - id: login
@@ -88,6 +104,7 @@ jobs:
           push: true
           build-args: |
             GBRAIN_REF=${{ steps.resolve.outputs.sha }}
+            BUN_VERSION=${{ inputs.bun_version || '1.4.3' }}
           tags: |
-            ${{ env.IMAGE }}:latest
+            ${{ steps.resolve.outputs.latest_tag }}
             ${{ env.IMAGE }}:${{ steps.resolve.outputs.version }}
