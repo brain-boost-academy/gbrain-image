@@ -23,6 +23,10 @@ on:
         description: "oven/bun base image version (gbrain >= 0.60.27.0 needs 1.4+)"
         required: false
         default: "1.4.3"
+      tag_suffix:
+        description: "appended to the version tag (e.g. -bun1.4.3) so a rebuild doesn't overwrite an existing tag"
+        required: false
+        default: ""
 
 jobs:
   build:
@@ -107,4 +111,4 @@ jobs:
             BUN_VERSION=${{ inputs.bun_version || '1.4.3' }}
           tags: |
             ${{ steps.resolve.outputs.latest_tag }}
-            ${{ env.IMAGE }}:${{ steps.resolve.outputs.version }}
+            ${{ env.IMAGE }}:${{ steps.resolve.outputs.version }}${{ inputs.tag_suffix }}
